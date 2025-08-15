@@ -1,0 +1,6 @@
+@TechJobs.API_HostAddress = http://localhost:5218
+
+GET {{TechJobs.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
