@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using TechJobs.Application.Interfaces.Services;
 using TechJobs.Application.Mappers;
 using TechJobs.Domain.Entities;
@@ -12,6 +13,8 @@ public class JobsController : ControllerBase
     private readonly IJobService _jobService;
     public JobsController(IJobService jobService) => _jobService = jobService;
 
+    // Public
+    [AllowAnonymous]
     [HttpGet]
     public async Task<IActionResult> GetApproved()
     {
@@ -22,6 +25,8 @@ public class JobsController : ControllerBase
 
     public record CreateJobDto(string Title, string? Role, string? Description, string? Location, int EmployerId, int? MinExperienceYears, List<int> TechStackIds);
 
+    // Employer only
+    [Authorize(Roles = "Employer")]
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateJobDto dto)
     {
@@ -41,6 +46,8 @@ public class JobsController : ControllerBase
         return CreatedAtAction(nameof(GetApproved), new { id = created.Id }, new { created.Id, created.Title });
     }
 
+    // Public search
+    [AllowAnonymous]
     [HttpGet("search")]
     public async Task<IActionResult> Search([FromQuery] string? techStack, [FromQuery] string? location, [FromQuery] int? minExp, [FromQuery] string? role)
     {
@@ -49,6 +56,8 @@ public class JobsController : ControllerBase
         return Ok(dto);
     }
 
+    // Admin only
+    [Authorize(Roles = "Admin")]
     [HttpPut("{id:int}/approve")]
     public async Task<IActionResult> Approve(int id)
     {

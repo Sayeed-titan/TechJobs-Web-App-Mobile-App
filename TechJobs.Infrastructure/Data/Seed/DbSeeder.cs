@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using TechJobs.Domain.Entities;
+using TechJobs.Domain.Enums;
 
 namespace TechJobs.Infrastructure.Data.Seed;
 
@@ -7,41 +8,36 @@ public static class DbSeeder
 {
     public static async Task SeedAsync(AppDbContext ctx)
     {
-        // Ensure DB/migrations are applied
         await ctx.Database.MigrateAsync();
 
-        // Users (Admin, Employer, Candidate)
-        if (!await ctx.Users.AnyAsync())
-        {
-            var admin = new User
-            {
-                FullName = "System Admin",
-                Email = "admin@techjobs.local",
-                PasswordHash = "admin-hash", // TODO: replace with real hash when auth is added
-                Role = Domain.Enums.RoleType.Admin
-            };
-            var employer = new User
-            {
-                FullName = "Acme HR",
-                Email = "hr@acme.local",
-                PasswordHash = "employer-hash",
-                Role = Domain.Enums.RoleType.Employer,
-                CompanyName = "Acme Software",
-                CompanyWebsite = "https://acme.local"
-            };
-            var candidate = new User
-            {
-                FullName = "John Candidate",
-                Email = "john@dev.local",
-                PasswordHash = "candidate-hash",
-                Role = Domain.Enums.RoleType.Candidate,
-                SkillsCsv = "C#, .NET, Angular",
-                ResumeUrl = "https://example.com/resume/john"
-            };
+        // Ensure (create or fix) users with proper bcrypt hashes
+        var admin = await EnsureUserAsync(
+            ctx,
+            email: "admin@techjobs.local",
+            fullName: "System Admin",
+            plainPassword: "Admin@123",
+            role: RoleType.Admin
+        );
 
-            await ctx.Users.AddRangeAsync(admin, employer, candidate);
-            await ctx.SaveChangesAsync();
-        }
+        var employer = await EnsureUserAsync(
+            ctx,
+            email: "hr@acme.local",
+            fullName: "Acme HR",
+            plainPassword: "Employer@123",
+            role: RoleType.Employer,
+            companyName: "Acme Software",
+            companyWebsite: "https://acme.local"
+        );
+
+        var candidate = await EnsureUserAsync(
+            ctx,
+            email: "john@dev.local",
+            fullName: "John Candidate",
+            plainPassword: "Candidate@123",
+            role: RoleType.Candidate,
+            skillsCsv: "C#, .NET, Angular",
+            resumeUrl: "https://example.com/resume/john"
+        );
 
         // Tech stacks
         if (!await ctx.TechStacks.AnyAsync())
@@ -60,11 +56,9 @@ public static class DbSeeder
             await ctx.SaveChangesAsync();
         }
 
-        // Jobs + links
+        // Jobs
         if (!await ctx.Jobs.AnyAsync())
         {
-            var employer = await ctx.Users.FirstAsync(u => u.Role == Domain.Enums.RoleType.Employer);
-
             var job1 = new Job
             {
                 Title = "Backend Developer",
@@ -84,26 +78,78 @@ public static class DbSeeder
                 Location = "Remote",
                 EmployerId = employer.Id,
                 MinExperienceYears = 1,
-                IsApproved = false // waiting for admin approval
+                IsApproved = false
             };
 
             await ctx.Jobs.AddRangeAsync(job1, job2);
             await ctx.SaveChangesAsync();
 
             // attach tech stacks
-            var find = (string name) => ctx.TechStacks.First(ts => ts.Name == name);
-
+            TechStack TS(string name) => ctx.TechStacks.First(ts => ts.Name == name);
             ctx.JobTechStacks.AddRange(
-                new JobTechStack { JobId = job1.Id, TechStackId = find("C#").Id },
-                new JobTechStack { JobId = job1.Id, TechStackId = find("ASP.NET Core").Id },
-                new JobTechStack { JobId = job1.Id, TechStackId = find("SQL Server").Id },
+                new JobTechStack { JobId = job1.Id, TechStackId = TS("C#").Id },
+                new JobTechStack { JobId = job1.Id, TechStackId = TS("ASP.NET Core").Id },
+                new JobTechStack { JobId = job1.Id, TechStackId = TS("SQL Server").Id },
 
-                new JobTechStack { JobId = job2.Id, TechStackId = find("C#").Id },
-                new JobTechStack { JobId = job2.Id, TechStackId = find("Angular").Id },
-                new JobTechStack { JobId = job2.Id, TechStackId = find("React").Id }
+                new JobTechStack { JobId = job2.Id, TechStackId = TS("C#").Id },
+                new JobTechStack { JobId = job2.Id, TechStackId = TS("Angular").Id },
+                new JobTechStack { JobId = job2.Id, TechStackId = TS("React").Id }
             );
 
             await ctx.SaveChangesAsync();
         }
     }
+
+    private static async Task<User> EnsureUserAsync(
+        AppDbContext ctx,
+        string email,
+        string fullName,
+        string plainPassword,
+        RoleType role,
+        string? companyName = null,
+        string? companyWebsite = null,
+        string? skillsCsv = null,
+        string? resumeUrl = null)
+    {
+        var user = await ctx.Users.FirstOrDefaultAsync(u => u.Email == email);
+        if (user is null)
+        {
+            user = new User
+            {
+                FullName = fullName,
+                Email = email,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(plainPassword),
+                Role = role,
+                CompanyName = companyName,
+                CompanyWebsite = companyWebsite,
+                SkillsCsv = skillsCsv,
+                ResumeUrl = resumeUrl
+            };
+            ctx.Users.Add(user);
+            await ctx.SaveChangesAsync();
+            return user;
+        }
+
+        // Update weak/legacy hashes in-place
+        if (!IsBcrypt(user.PasswordHash))
+        {
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(plainPassword);
+        }
+
+        // Keep other metadata fresh (optional)
+        user.FullName = fullName;
+        user.Role = role;
+        if (companyName is not null) user.CompanyName = companyName;
+        if (companyWebsite is not null) user.CompanyWebsite = companyWebsite;
+        if (skillsCsv is not null) user.SkillsCsv = skillsCsv;
+        if (resumeUrl is not null) user.ResumeUrl = resumeUrl;
+
+        ctx.Users.Update(user);
+        await ctx.SaveChangesAsync();
+        return user;
+    }
+
+    private static bool IsBcrypt(string? hash)
+        => !string.IsNullOrWhiteSpace(hash) &&
+           (hash!.StartsWith("$2a$") || hash.StartsWith("$2b$") || hash.StartsWith("$2y$"));
 }
