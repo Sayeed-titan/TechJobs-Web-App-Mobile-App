@@ -35,4 +35,16 @@ public class JobService : IJobService
 
     public Task<List<Job>> SearchAsync(string? techStack, string? location, int? minExp, string? role)
         => _uow.JobSearch.SearchAsync(techStack, location, minExp, role);
+
+    public async Task<bool> ApproveJobAsync(int jobId)
+    {
+        var job = await _uow.Jobs.GetByIdAsync(jobId);
+        if (job == null) return false;
+
+        job.IsApproved = true;
+        _uow.Jobs.Update(job);
+        await _uow.SaveChangesAsync();
+        return true;
+    }
+
 }

@@ -12,5 +12,7 @@ namespace TechJobs.Application.Interfaces.Services
         Task<Job> CreateJobAsync(Job job, IEnumerable<int> techStackIds);
         Task<IEnumerable<Job>> GetApprovedJobsAsync();
         Task<List<Job>> SearchAsync(string? techStack, string? location, int? minExp, string? role);
+        Task<bool> ApproveJobAsync(int jobId);
+
     }
 }
